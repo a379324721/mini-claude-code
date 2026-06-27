@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mini-claude-code"
+version = "1.0.0"
+description = "A minimal coding agent inspired by Claude Code"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "anthropic>=0.40.0",
+    "openai>=1.50.0",
+    "rich>=13.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+mini-claude-code = "mini_claude_code.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mini_claude_code*"]
