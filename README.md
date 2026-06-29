@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-一个从零开始用 Python 实现的极简版 Claude Code，约 4400 行代码复刻 Agent 核心循环。
+一个从零开始用 Python 实现的极简版 Claude Code，约 4300 行代码复刻 Agent 核心循环。
 
 ## 特性
 
@@ -72,6 +72,11 @@ mini-claude-code/
         ├── __init__.py
         ├── __main__.py
         ├── agent.py
+        ├── backends/
+        │   ├── __init__.py
+        │   ├── base.py
+        │   ├── anthropic.py
+        │   └── openai.py
         ├── tools.py
         ├── prompt.py
         ├── ui.py
@@ -85,7 +90,8 @@ mini-claude-code/
 
 | 文件 | 说明 |
 |------|------|
-| `agent.py` | Agent 核心循环、双后端、4 层压缩 |
+| `agent.py` | Agent 核心循环、4 层压缩、Plan / 子 Agent / Skill 调度 |
+| `backends/` | Backend 抽象 + Anthropic / OpenAI 兼容两套实现 |
 | `tools.py` | 12 个工具 + 5 种权限模式 |
 | `__main__.py` | CLI 入口与 REPL |
 | `ui.py` | 终端 UI(rich) |
@@ -101,7 +107,7 @@ mini-claude-code/
 
 | 维度 | mini-claude-code | 官方 Claude Code |
 |------|------------------|------------------|
-| 代码量 | ~4400 行 Python | ~51.2 万行（闭源） |
+| 代码量 | ~4300 行 Python | ~51.2 万行（闭源） |
 | 后端 | Anthropic + OpenAI 兼容 | Anthropic 专用 |
 | 工具数 | 12 | 更多 |
 | 扩展点 | 记忆 / 技能 / 子 Agent / MCP | 同 |
