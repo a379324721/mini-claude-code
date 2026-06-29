@@ -23,6 +23,7 @@ from .base import (
     SNIP_THRESHOLD,
     MICROCOMPACT_IDLE_S,
     ToolResult,
+    estimate_tokens_from_messages,
     get_max_output_tokens,
     with_retry,
 )
@@ -370,3 +371,4 @@ class AnthropicBackend(Backend):
     def restore(self, session_data: dict) -> None:
         if session_data.get("anthropicMessages"):
             self.messages = session_data["anthropicMessages"]
+            self.last_input_token_count = estimate_tokens_from_messages(self.messages)

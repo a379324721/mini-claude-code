@@ -21,6 +21,7 @@ from .base import (
     SNIP_PLACEHOLDER,
     SNIP_THRESHOLD,
     ToolResult,
+    estimate_tokens_from_messages,
     with_retry,
 )
 
@@ -318,3 +319,4 @@ class OpenAIBackend(Backend):
     def restore(self, session_data: dict) -> None:
         if session_data.get("openaiMessages"):
             self.messages = session_data["openaiMessages"]
+            self.last_input_token_count = estimate_tokens_from_messages(self.messages)
