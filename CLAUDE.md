@@ -60,6 +60,8 @@ Agent 同时支持 Anthropic 原生 API 和 OpenAI 兼容 API(DeepSeek / Qwen / 
 
 子 Agent 的输出通过 `_output_buffer: list[str]` 捕获,而不是直接 print;`run_once()` 是入口。
 
+自定义 Agent 类型放在 `~/.claude/agents/*.md`(用户级)和 `./.claude/agents/*.md`(项目级,覆盖用户级),frontmatter 含 `name` / `description` / 可选 `allowed-tools`,正文是 system_prompt。`allowed-tools` 按工具名**精确匹配本项目的 snake_case 名**(`read_file` / `write_file` / `edit_file` / `list_files` / `grep_search` / `run_shell` / `web_fetch`),**不兼容 Claude Code 官方的 PascalCase 写法**(`Read` / `Bash`)——写错会过滤出空工具集,子 Agent 变哑巴。可用类型必须经 `inject_agent_types()` 注入 `agent` 工具的 `type.enum` 才能被模型选中(`subagent.py` 的 `get_available_agent_types()` 单独喂 system prompt 文字是不够的)。
+
 ### 记忆召回(非阻塞)
 
 每个用户回合开始时 `start_memory_prefetch()` 启动后台 task(签名:`async (system, user) -> str`,从 `backend.side_query()` 取得)。主循环每次迭代检查 prefetch 是否 settled,settled 后通过 `append_user_text_inline_or_new()` 把召回结果追加到最后一条 user 消息——`AnthropicBackend` 要兼容 str 和 list 两种 content 形态(后者 push 一个 `{"type":"text"}` 块)。
