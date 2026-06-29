@@ -175,7 +175,7 @@ class OpenAIBackend(Backend):
                     "tool_calls": assembled,
                 },
                 "finish_reason": finish_reason or "stop",
-                "usage": usage or {"prompt_tokens": 0, "completion_tokens": 0},
+                "usage": usage,  # 可能是 None — 某些 OpenAI 兼容服务不 emit usage
             }
 
         response = await with_retry(_do, on_retry=self._on_retry)
@@ -199,9 +199,14 @@ class OpenAIBackend(Backend):
                 id=tc["id"], name=tc["function"]["name"], input=inp,
             ))
 
-        self.last_input_token_count = usage["prompt_tokens"]
         self.last_api_call_time = time.time()
 
+        if usage is None:
+            # 服务端没给 usage(vLLM / LM Studio / 部分代理) —— 保留上一次的水位
+            # 估计,别覆盖为 0,否则压缩管道阈值永远摸不到。
+            return tool_uses, {"input": 0, "output": 0}
+
+        self.last_input_token_count = usage["prompt_tokens"]
         return tool_uses, {
             "input": usage["prompt_tokens"],
             "output": usage["completion_tokens"],
