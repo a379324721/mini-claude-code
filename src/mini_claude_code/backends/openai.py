@@ -40,6 +40,17 @@ def _to_openai_tools(tools: list[ToolDef]) -> list[dict]:
     ]
 
 
+def _is_safe_compact_tail(msg: dict) -> bool:
+    """末尾消息能否在压缩后 re-append 而不破坏 tool_calls 配对。"""
+    role = msg.get("role")
+    if role == "user":
+        return True
+    if role == "assistant":
+        return not msg.get("tool_calls")
+    # tool 角色的结果消息: 上游 tool_calls 已被切走,不要保留
+    return False
+
+
 class OpenAIBackend(Backend):
     def __init__(
         self,
@@ -276,13 +287,14 @@ class OpenAIBackend(Backend):
     # ─── 压缩 第 4 层: 摘要 ─────────────────────
 
     async def compact_conversation(self) -> bool:
-        # 不变式: 调用者必须保证最后一条消息是普通的 user 文本消息
-        # (不是 `tool` 角色的结果消息)。理由同 Anthropic 后端: 切掉 tool result
-        # 会让前面 assistant 的 tool_calls 变成孤立块。
+        # 切掉末尾那条做摘要,然后视情况 re-append:
+        #   - user 文本 / assistant 普通文本回复: 保留
+        #   - assistant 含 tool_calls / role=='tool': 不保留(会留下
+        #     孤立 tool_call,下次 OpenAI 调用会被拒)
         if len(self.messages) < 5:
             return False
         system_msg = self.messages[0]
-        last_user_msg = self.messages[-1]
+        last_msg = self.messages[-1]
         summary_resp = await self._client.chat.completions.create(
             model=self.model,
             messages=[
@@ -297,8 +309,8 @@ class OpenAIBackend(Backend):
             {"role": "user", "content": f"[此前对话的摘要]\n{summary_text}"},
             {"role": "assistant", "content": "已了解。我掌握了之前对话的上下文。请问要如何继续协助?"},
         ]
-        if last_user_msg.get("role") == "user":
-            self.messages.append(last_user_msg)
+        if _is_safe_compact_tail(last_msg):
+            self.messages.append(last_msg)
         self.last_input_token_count = 0
         return True
 

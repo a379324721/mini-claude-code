@@ -29,6 +29,27 @@ from .base import (
 )
 
 
+def _is_safe_compact_tail(msg: dict) -> bool:
+    """末尾消息能否在压缩后 re-append 而不破坏 tool_use/tool_result 配对。"""
+    role = msg.get("role")
+    content = msg.get("content")
+    if role == "user":
+        if isinstance(content, str):
+            return True
+        if isinstance(content, list):
+            return not any(
+                isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+            )
+        return False
+    if role == "assistant":
+        if isinstance(content, list):
+            return not any(
+                isinstance(b, dict) and b.get("type") == "tool_use" for b in content
+            )
+        return True
+    return False
+
+
 class AnthropicBackend(Backend):
     api_base = None  # Anthropic 用 SDK 默认 base url
 
@@ -309,13 +330,14 @@ class AnthropicBackend(Backend):
     # ─── 压缩 第 4 层: 摘要 ─────────────────────
 
     async def compact_conversation(self) -> bool:
-        # 不变式: 调用者必须保证最后一条消息是普通的 user 文本消息
-        # (不是 tool_result)。下面会切掉它;如果是 tool_result,
-        # 前面 assistant 的 tool_use 会变成孤立块,API 会拒绝这次
-        # 摘要调用。
+        # 切掉末尾那条做摘要,然后视情况 re-append:
+        #   - user 文本 / assistant 文本: 保留(用户刚输入或助手刚回复)
+        #   - user 含 tool_result list / assistant 含 tool_use: 不保留
+        #     (re-append 后会出现孤立的 tool_use ↔ tool_result,
+        #      下次 API 调用会被拒)
         if len(self.messages) < 4:
             return False
-        last_user_msg = self.messages[-1]
+        last_msg = self.messages[-1]
         summary_resp = await self._client.messages.create(
             model=self.model,
             max_tokens=2048,
@@ -334,8 +356,8 @@ class AnthropicBackend(Backend):
             {"role": "user", "content": f"[此前对话的摘要]\n{summary_text}"},
             {"role": "assistant", "content": "已了解。我掌握了之前对话的上下文。请问要如何继续协助?"},
         ]
-        if last_user_msg.get("role") == "user":
-            self.messages.append(last_user_msg)
+        if _is_safe_compact_tail(last_msg):
+            self.messages.append(last_msg)
         self.last_input_token_count = 0
         return True
 
