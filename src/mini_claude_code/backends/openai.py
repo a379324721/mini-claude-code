@@ -265,12 +265,12 @@ class OpenAIBackend(Backend):
 
     # ─── 压缩 第 4 层: 摘要 ─────────────────────
 
-    async def compact_conversation(self) -> None:
+    async def compact_conversation(self) -> bool:
         # 不变式: 调用者必须保证最后一条消息是普通的 user 文本消息
         # (不是 `tool` 角色的结果消息)。理由同 Anthropic 后端: 切掉 tool result
         # 会让前面 assistant 的 tool_calls 变成孤立块。
         if len(self.messages) < 5:
-            return
+            return False
         system_msg = self.messages[0]
         last_user_msg = self.messages[-1]
         summary_resp = await self._client.chat.completions.create(
@@ -290,6 +290,7 @@ class OpenAIBackend(Backend):
         if last_user_msg.get("role") == "user":
             self.messages.append(last_user_msg)
         self.last_input_token_count = 0
+        return True
 
     # ─── 记忆 side query ────────────────────────
 

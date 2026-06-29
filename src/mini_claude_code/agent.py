@@ -264,8 +264,10 @@ class Agent:
         return {"exceeded": False}
 
     async def compact(self) -> None:
-        await self.backend.compact_conversation()
-        print_info("会话已压缩。")
+        if await self.backend.compact_conversation():
+            print_info("会话已压缩。")
+        else:
+            print_info("会话太短,无需压缩。")
 
     # ─── 会话 ──────────────────────────────────────────────
 
@@ -294,8 +296,8 @@ class Agent:
         bw = self.backend.effective_window
         if self.backend.last_input_token_count > bw * 0.85:
             print_info("上下文窗口即将填满,正在压缩会话……")
-            await self.backend.compact_conversation()
-            print_info("会话已压缩。")
+            if await self.backend.compact_conversation():
+                print_info("会话已压缩。")
 
     # ─── 大结果持久化 ─────────────────────────────────
     # 当工具结果超过 30 KB,把它写入磁盘,并把上下文里那条记录替换成

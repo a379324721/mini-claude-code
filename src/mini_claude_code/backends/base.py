@@ -208,7 +208,8 @@ class Backend(ABC):
     def microcompact(self) -> None: ...
 
     @abstractmethod
-    async def compact_conversation(self) -> None: ...
+    async def compact_conversation(self) -> bool:
+        """返回 True 表示真的执行了摘要,False 表示因消息太少早退、什么都没做。"""
 
     def run_compression_pipeline(self) -> None:
         """流水线: 限额 → 裁剪 → microcompact。回合边界调用。"""

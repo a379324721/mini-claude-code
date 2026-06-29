@@ -301,13 +301,13 @@ class AnthropicBackend(Backend):
 
     # ─── 压缩 第 4 层: 摘要 ─────────────────────
 
-    async def compact_conversation(self) -> None:
+    async def compact_conversation(self) -> bool:
         # 不变式: 调用者必须保证最后一条消息是普通的 user 文本消息
         # (不是 tool_result)。下面会切掉它;如果是 tool_result,
         # 前面 assistant 的 tool_use 会变成孤立块,API 会拒绝这次
         # 摘要调用。
         if len(self.messages) < 4:
-            return
+            return False
         last_user_msg = self.messages[-1]
         summary_resp = await self._client.messages.create(
             model=self.model,
@@ -330,6 +330,7 @@ class AnthropicBackend(Backend):
         if last_user_msg.get("role") == "user":
             self.messages.append(last_user_msg)
         self.last_input_token_count = 0
+        return True
 
     # ─── 内部: 反查 tool_use 元信息 ─────────────
 
