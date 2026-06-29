@@ -51,6 +51,9 @@ class AnthropicBackend(Backend):
             on_retry=on_retry,
         )
         self.messages: list[dict] = []
+        # 留存原始配置供子 Agent 复用(SDK 内部存了但不可靠)
+        self._api_key = api_key
+        self._anthropic_base_url = anthropic_base_url
         kwargs: dict[str, Any] = {}
         if api_key:
             kwargs["api_key"] = api_key
@@ -362,6 +365,15 @@ class AnthropicBackend(Backend):
             return "".join(b.text for b in resp.content if b.type == "text")
 
         return _sq
+
+    # ─── 子 Agent 配置 ──────────────────────────
+
+    def child_config(self) -> dict:
+        return {
+            "api_base": None,
+            "anthropic_base_url": self._anthropic_base_url,
+            "api_key": self._api_key,
+        }
 
     # ─── 会话持久化 ─────────────────────────────
 

@@ -60,6 +60,7 @@ class OpenAIBackend(Backend):
             on_retry=on_retry,
         )
         self.api_base = api_base
+        self._api_key = api_key
         self._client = openai.AsyncOpenAI(base_url=api_base, api_key=api_key)
         self.messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
@@ -315,6 +316,15 @@ class OpenAIBackend(Backend):
             return resp.choices[0].message.content or "" if resp.choices else ""
 
         return _sq
+
+    # ─── 子 Agent 配置 ──────────────────────────
+
+    def child_config(self) -> dict:
+        return {
+            "api_base": self.api_base,
+            "anthropic_base_url": None,
+            "api_key": self._api_key,
+        }
 
     # ─── 会话持久化 ─────────────────────────────
 

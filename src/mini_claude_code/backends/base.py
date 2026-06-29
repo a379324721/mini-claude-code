@@ -233,6 +233,13 @@ class Backend(ABC):
     def side_query(self) -> Callable[[str, str], Awaitable[str]] | None:
         """返回一个用于记忆召回的轻量调用,签名 async (system, user) -> str。"""
 
+    # ── 子 Agent 复用配置 ──
+    @abstractmethod
+    def child_config(self) -> dict:
+        """返回创建相同配置的 backend 所需的全部参数(api_base /
+        anthropic_base_url / api_key 等)。子 Agent 通过 **child_config()
+        透传,避免漏传 base_url / api_key 导致连接错端点或拿不到鉴权。"""
+
     # ── 会话持久化 ──
     @abstractmethod
     def serialize(self) -> dict:

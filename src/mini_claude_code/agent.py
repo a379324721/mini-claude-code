@@ -368,11 +368,11 @@ class Agent:
             print_sub_agent_start("skill-fork", inp.get("skill_name", ""))
             sub_agent = Agent(
                 model=self.model,
-                api_base=self.backend.api_base,
                 custom_system_prompt=result["prompt"],
                 custom_tools=tools,
                 is_sub_agent=True,
                 permission_mode="plan" if self.permission_mode == "plan" else "bypassPermissions",
+                **self.backend.child_config(),
             )
             try:
                 sub_result = await sub_agent.run_once(inp.get("args") or "执行该 skill 任务。")
@@ -506,11 +506,11 @@ Plan 模式已启用。除了下面这个 plan 文件之外,绝对不要做任�
         config = get_sub_agent_config(agent_type)
         sub_agent = Agent(
             model=self.model,
-            api_base=self.backend.api_base,
             custom_system_prompt=config["system_prompt"],
             custom_tools=config["tools"],
             is_sub_agent=True,
             permission_mode="plan" if self.permission_mode == "plan" else "bypassPermissions",
+            **self.backend.child_config(),
         )
 
         try:
