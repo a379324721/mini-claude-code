@@ -110,8 +110,11 @@ class OpenAIBackend(Backend):
         tools: list[ToolDef],
         thinking_mode: str,  # noqa: ARG002 — OpenAI 后端忽略
         on_tool_block_complete: Callable[[NormalizedToolUse], None] | None,  # noqa: ARG002
+        on_attempt_retry: Callable[[], None] | None = None,
     ) -> tuple[list[NormalizedToolUse], dict]:
-        async def _do():
+        async def _do(attempt: int):
+            if attempt > 0 and on_attempt_retry:
+                on_attempt_retry()
             stream = await self._client.chat.completions.create(
                 model=self.model,
                 tools=_to_openai_tools(tools),

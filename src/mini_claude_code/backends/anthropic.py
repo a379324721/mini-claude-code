@@ -107,8 +107,11 @@ class AnthropicBackend(Backend):
         tools: list[ToolDef],
         thinking_mode: str,
         on_tool_block_complete: Callable[[NormalizedToolUse], None] | None,
+        on_attempt_retry: Callable[[], None] | None = None,
     ) -> tuple[list[NormalizedToolUse], dict]:
-        async def _do():
+        async def _do(attempt: int):
+            if attempt > 0 and on_attempt_retry:
+                on_attempt_retry()
             max_output = get_max_output_tokens(self.model)
             create_params: dict[str, Any] = {
                 "model": self.model,

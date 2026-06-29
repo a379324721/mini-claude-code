@@ -84,9 +84,11 @@ def is_retryable(error: Exception) -> bool:
 
 
 async def with_retry(fn, max_retries: int = 3, on_retry: Callable[[int, int, str], None] | None = None):
+    """fn 接受当前 attempt 号(0=首次,1+=重试)。重试时 fn 可以据此清理上次
+    attempt 已经启动的副作用(例如流式期间提前启动的工具 task)。"""
     for attempt in range(max_retries + 1):
         try:
-            return await fn()
+            return await fn(attempt)
         except Exception as error:
             if attempt >= max_retries or not is_retryable(error):
                 raise
@@ -199,6 +201,7 @@ class Backend(ABC):
         tools: list[ToolDef],
         thinking_mode: str,
         on_tool_block_complete: Callable[[NormalizedToolUse], None] | None,
+        on_attempt_retry: Callable[[], None] | None = None,
     ) -> tuple[list[NormalizedToolUse], dict]:
         """发起一次流式 API 调用。
 
@@ -206,7 +209,11 @@ class Backend(ABC):
         assistant 消息已由内部 append 到 messages。
 
         OpenAI 后端会忽略 on_tool_block_complete(无对应事件)。
-        thinking_mode 由 Anthropic 后端读取,OpenAI 忽略。"""
+        thinking_mode 由 Anthropic 后端读取,OpenAI 忽略。
+
+        on_attempt_retry 在每次内部重试进入下一轮 attempt 前调用,主循环
+        可以据此清理上次 attempt 中由 on_tool_block_complete 提前启动的
+        工具 task,避免孤儿。"""
 
     # ── 4 层压缩 ──
     @abstractmethod
