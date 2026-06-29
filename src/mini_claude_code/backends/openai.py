@@ -321,7 +321,9 @@ class OpenAIBackend(Backend):
     def serialize(self) -> dict:
         return {"anthropicMessages": None, "openaiMessages": self.messages}
 
-    def restore(self, session_data: dict) -> None:
+    def restore(self, session_data: dict) -> bool:
         if session_data.get("openaiMessages"):
             self.messages = session_data["openaiMessages"]
             self.last_input_token_count = estimate_tokens_from_messages(self.messages)
+            return True
+        return False

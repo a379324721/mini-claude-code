@@ -239,5 +239,7 @@ class Backend(ABC):
         """返回 {'anthropicMessages': [...]} 或 {'openaiMessages': [...]}。"""
 
     @abstractmethod
-    def restore(self, session_data: dict) -> None:
-        """从 session JSON 还原 messages。"""
+    def restore(self, session_data: dict) -> bool:
+        """从 session JSON 还原 messages。返回 True 表示找到了本后端的消息
+        并成功还原;返回 False 表示 session_data 里没有本后端的数据
+        (跨后端切换、或老格式)。"""

@@ -272,8 +272,20 @@ class Agent:
     # ─── 会话 ──────────────────────────────────────────────
 
     def restore_session(self, data: dict) -> None:
-        self.backend.restore(data)
-        print_info(f"会话已恢复(共 {self.backend.message_count()} 条消息)。")
+        if self.backend.restore(data):
+            print_info(f"会话已恢复(共 {self.backend.message_count()} 条消息)。")
+            return
+        # 当前后端没找到自己的消息 —— 多半是上次保存时用的另一个后端。
+        other = "openaiMessages" if data.get("openaiMessages") else (
+            "anthropicMessages" if data.get("anthropicMessages") else None
+        )
+        if other:
+            print_info(
+                f"会话恢复失败:saved session 含 {other},当前后端不兼容。"
+                "请切换到匹配的后端再 --resume(或先 /clear)。"
+            )
+        else:
+            print_info("会话恢复失败:session 数据为空。")
 
     def _auto_save(self) -> None:
         try:
