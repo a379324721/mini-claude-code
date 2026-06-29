@@ -163,8 +163,15 @@ class OpenAIBackend(Backend):
                     for tc in delta.tool_calls:
                         existing = tool_calls.get(tc.index)
                         if existing:
-                            if tc.function and tc.function.arguments:
-                                existing["arguments"] += tc.function.arguments
+                            # 部分 OpenAI 兼容服务把 id / function.name 拆到
+                            # 后续 chunk 才发,这里允许补齐(已有值时不覆盖)。
+                            if tc.id and not existing["id"]:
+                                existing["id"] = tc.id
+                            if tc.function:
+                                if tc.function.name and not existing["name"]:
+                                    existing["name"] = tc.function.name
+                                if tc.function.arguments:
+                                    existing["arguments"] += tc.function.arguments
                         else:
                             tool_calls[tc.index] = {
                                 "id": tc.id or "",
