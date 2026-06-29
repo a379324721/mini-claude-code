@@ -21,3 +21,8 @@ mini-claude-code = "mini_claude_code.__main__:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["mini_claude_code*"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
