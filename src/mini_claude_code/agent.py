@@ -100,6 +100,8 @@ class Agent:
 
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        self.total_cache_read_tokens = 0
+        self.total_cache_creation_tokens = 0
         self.current_turns = 0
 
         # 中断支持
@@ -113,6 +115,9 @@ class Agent:
         self._pre_plan_mode: str | None = None
         self._plan_file_path: str | None = None
         self._plan_approval_fn: Callable[[str], Awaitable[dict]] | None = None
+        # plan 约束文案待注入到下一条 user 消息(用于没有 tool_result 通道的
+        # 路径: 手动 /plan 与初始 --plan)。绝不写进 system,以免破坏缓存前缀。
+        self._pending_plan_notice: str | None = None
         self._context_cleared: bool = False  # plan 审批清空上下文时置位
 
         # Thinking 模式
@@ -132,13 +137,14 @@ class Agent:
         self._already_surfaced_memories: set[str] = set()
         self._session_memory_bytes = 0
 
-        # 系统提示词
+        # 系统提示词 —— 整个会话生命周期恒定(只含 base),plan 约束走 message
+        # 通道传达。这样 system 缓存断点的前缀永不变化,进出 plan 模式不会
+        # 使 tools+system 的缓存失效。
         self._base_system_prompt = custom_system_prompt or build_system_prompt()
+        self._system_prompt = self._base_system_prompt
         if self.permission_mode == "plan":
             self._plan_file_path = self._generate_plan_file_path()
-            self._system_prompt = self._base_system_prompt + self._build_plan_mode_prompt()
-        else:
-            self._system_prompt = self._base_system_prompt
+            self._pending_plan_notice = self._build_plan_mode_prompt()
 
         # 后端
         self.backend: Backend = make_backend(
@@ -182,16 +188,14 @@ class Agent:
             self.permission_mode = self._pre_plan_mode or "default"
             self._pre_plan_mode = None
             self._plan_file_path = None
-            self._system_prompt = self._base_system_prompt
-            self.backend.set_system_prompt(self._system_prompt)
+            self._pending_plan_notice = None
             print_info(f"已退出 plan 模式 → {self.permission_mode} 模式")
             return self.permission_mode
         else:
             self._pre_plan_mode = self.permission_mode
             self.permission_mode = "plan"
             self._plan_file_path = self._generate_plan_file_path()
-            self._system_prompt = self._base_system_prompt + self._build_plan_mode_prompt()
-            self.backend.set_system_prompt(self._system_prompt)
+            self._pending_plan_notice = self._build_plan_mode_prompt()
             print_info(f"已进入 plan 模式。Plan 文件: {self._plan_file_path}")
             return "plan"
 
@@ -230,6 +234,8 @@ class Agent:
         self._output_buffer = []
         prev_in = self.total_input_tokens
         prev_out = self.total_output_tokens
+        prev_cache_read = self.total_cache_read_tokens
+        prev_cache_creation = self.total_cache_creation_tokens
         await self.chat(prompt)
         text = "".join(self._output_buffer)
         self._output_buffer = None
@@ -238,6 +244,8 @@ class Agent:
             "tokens": {
                 "input": self.total_input_tokens - prev_in,
                 "output": self.total_output_tokens - prev_out,
+                "cache_read": self.total_cache_read_tokens - prev_cache_read,
+                "cache_creation": self.total_cache_creation_tokens - prev_cache_creation,
             },
         }
 
@@ -255,6 +263,8 @@ class Agent:
         self.backend.clear_history()
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        self.total_cache_read_tokens = 0
+        self.total_cache_creation_tokens = 0
         print_info("会话已清空。")
 
     def show_cost(self) -> None:
@@ -267,13 +277,24 @@ class Agent:
             )
             return
         budget_info = f" / 预算 ${self.max_cost_usd}" if self.max_cost_usd else ""
+        cache_info = ""
+        if self.total_cache_read_tokens or self.total_cache_creation_tokens:
+            cache_info = (
+                f"\n  缓存: 命中 {self.total_cache_read_tokens}"
+                f" / 写入 {self.total_cache_creation_tokens}"
+            )
         print_info(
-            f"Token: 输入 {self.total_input_tokens} / 输出 {self.total_output_tokens}\n"
+            f"Token: 输入 {self.total_input_tokens} / 输出 {self.total_output_tokens}{cache_info}\n"
             f"  预估费用: ${total:.4f}{budget_info}{turn_info}"
         )
 
     def _get_current_cost_usd(self) -> float | None:
-        return self.backend.estimate_cost_usd(self.total_input_tokens, self.total_output_tokens)
+        return self.backend.estimate_cost_usd(
+            self.total_input_tokens,
+            self.total_output_tokens,
+            self.total_cache_read_tokens,
+            self.total_cache_creation_tokens,
+        )
 
     def _check_budget(self) -> dict:
         cost = self._get_current_cost_usd()
@@ -398,6 +419,8 @@ class Agent:
                 sub_result = await sub_agent.run_once(inp.get("args") or "执行该 skill 任务。")
                 self.total_input_tokens += sub_result["tokens"]["input"]
                 self.total_output_tokens += sub_result["tokens"]["output"]
+                self.total_cache_read_tokens += sub_result["tokens"].get("cache_read", 0)
+                self.total_cache_creation_tokens += sub_result["tokens"].get("cache_creation", 0)
                 print_sub_agent_end("skill-fork", inp.get("skill_name", ""))
                 return sub_result["text"] or "(Skill 无输出)"
             except Exception as e:
@@ -441,14 +464,11 @@ Plan 模式已启用。除了下面这个 plan 文件之外,绝对不要做任�
             self._pre_plan_mode = self.permission_mode
             self.permission_mode = "plan"
             self._plan_file_path = self._generate_plan_file_path()
-            self._system_prompt = self._base_system_prompt + self._build_plan_mode_prompt()
-            self.backend.set_system_prompt(self._system_prompt)
             print_info("已进入 plan 模式(只读)。Plan 文件: " + self._plan_file_path)
+            # 文案直接作为 tool_result 回写(message 通道),不碰 system 前缀。
             return (
-                f"已进入 plan 模式。当前为只读模式。\n\n"
-                f"plan 文件: {self._plan_file_path}\n"
-                f"将你的计划写入这个文件,这是你唯一可以编辑的文件。\n\n"
-                f"计划完成后,调用 exit_plan_mode。"
+                f"已进入 plan 模式。当前为只读模式。\n"
+                f"{self._build_plan_mode_prompt()}"
             )
 
         if name == "exit_plan_mode":
@@ -482,10 +502,9 @@ Plan 模式已启用。除了下面这个 plan 文件之外,绝对不要做任�
                 # 退出 plan 模式
                 self.permission_mode = target_mode
                 self._pre_plan_mode = None
+                self._pending_plan_notice = None
                 saved_plan_path = self._plan_file_path
                 self._plan_file_path = None
-                self._system_prompt = self._base_system_prompt
-                self.backend.set_system_prompt(self._system_prompt)
 
                 if choice == "clear-and-execute":
                     self.backend.clear_history()
@@ -509,8 +528,7 @@ Plan 模式已启用。除了下面这个 plan 文件之外,绝对不要做任�
             self.permission_mode = self._pre_plan_mode or "default"
             self._pre_plan_mode = None
             self._plan_file_path = None
-            self._system_prompt = self._base_system_prompt
-            self.backend.set_system_prompt(self._system_prompt)
+            self._pending_plan_notice = None
             print_info("已退出 plan 模式。已恢复为 " + self.permission_mode + " 模式。")
             return f"已退出 plan 模式。权限模式已恢复为: {self.permission_mode}\n\n## 你的计划:\n{plan_content}"
 
@@ -536,6 +554,8 @@ Plan 模式已启用。除了下面这个 plan 文件之外,绝对不要做任�
             result = await sub_agent.run_once(prompt)
             self.total_input_tokens += result["tokens"]["input"]
             self.total_output_tokens += result["tokens"]["output"]
+            self.total_cache_read_tokens += result["tokens"].get("cache_read", 0)
+            self.total_cache_creation_tokens += result["tokens"].get("cache_creation", 0)
             print_sub_agent_end(agent_type, description)
             return result["text"] or "(子 Agent 无输出)"
         except Exception as e:
@@ -545,6 +565,11 @@ Plan 模式已启用。除了下面这个 plan 文件之外,绝对不要做任�
     # ─── 主循环 ───────────────────────────────────────
 
     async def _chat(self, user_message: str) -> None:
+        # plan 约束经 message 通道注入(手动 /plan 与初始 --plan 没有 tool_result
+        # 通道),prepend 到本回合 user 文本,不改 system 前缀。
+        if self._pending_plan_notice:
+            user_message = f"{self._pending_plan_notice}\n\n---\n\n{user_message}"
+            self._pending_plan_notice = None
         self.backend.append_user_text(user_message)
         # 仅在回合边界做自动压缩 —— 此时最后一条消息已是普通 user 文本,
         # backend 的 compact_conversation 切片就不会把上一回合 tool 调用对斩断。
@@ -599,6 +624,8 @@ Plan 模式已启用。除了下面这个 plan 文件之外,绝对不要做任�
 
             self.total_input_tokens += usage["input"]
             self.total_output_tokens += usage["output"]
+            self.total_cache_read_tokens += usage.get("cache_read", 0)
+            self.total_cache_creation_tokens += usage.get("cache_creation", 0)
 
             if not tool_uses:
                 if not self.is_sub_agent:
@@ -606,6 +633,7 @@ Plan 模式已启用。除了下面这个 plan 文件之外,绝对不要做任�
                         self.total_input_tokens,
                         self.total_output_tokens,
                         self._get_current_cost_usd(),
+                        self.total_cache_read_tokens,
                     )
                 break
 

@@ -137,9 +137,19 @@ class AnthropicBackend(Backend):
             create_params: dict[str, Any] = {
                 "model": self.model,
                 "max_tokens": max_output if thinking_mode != "disabled" else 16384,
-                "system": self._system_prompt,
-                "tools": tools,
-                "messages": self.messages,
+                # cache_control 断点: 缓存前缀顺序是 tools → system → messages。
+                # tools[-1] 与 system 末尾各打一个静态断点(整段稳定头部),
+                # messages 末尾打一个滚动断点(覆盖到上一回合的对话历史)。
+                # 共 3 个,在 Anthropic 4 断点上限内。
+                "system": [
+                    {
+                        "type": "text",
+                        "text": self._system_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    },
+                ],
+                "tools": self._with_cache_breakpoint(tools),
+                "messages": self._messages_with_cache_breakpoint(self.messages),
             }
             if thinking_mode in ("adaptive", "enabled"):
                 create_params["thinking"] = {"type": "enabled", "budget_tokens": max_output - 1}
@@ -213,12 +223,47 @@ class AnthropicBackend(Backend):
         usage = {
             "input": response.usage.input_tokens,
             "output": response.usage.output_tokens,
+            # 这两类是 input_tokens 之外单独计数的缓存 token,价格不同
+            # (写入 1.25×、命中 0.1×),为 None 时按 0 处理。
+            "cache_creation": getattr(response.usage, "cache_creation_input_tokens", 0) or 0,
+            "cache_read": getattr(response.usage, "cache_read_input_tokens", 0) or 0,
         }
         self.last_input_token_count = response.usage.input_tokens
 
         self.last_api_call_time = time.time()
 
         return tool_uses, usage
+
+    @staticmethod
+    def _with_cache_breakpoint(items: list[dict]) -> list[dict]:
+        """给 tools / content-block 列表的最后一个元素打 cache_control 断点。
+        浅拷贝最后一个元素,不污染调用方传入的对象。"""
+        if not items:
+            return items
+        out = list(items)
+        out[-1] = {**out[-1], "cache_control": {"type": "ephemeral"}}
+        return out
+
+    @classmethod
+    def _messages_with_cache_breakpoint(cls, messages: list[dict]) -> list[dict]:
+        """在最后一条 message 的最后一个 content block 上打滚动断点,
+        用于缓存到上一回合为止的对话历史。返回请求用副本,绝不改写
+        self.messages —— 否则会污染 serialize 与压缩流水线。
+        content 是 str 时先包成 text block 再打断点。"""
+        if not messages:
+            return messages
+        out = list(messages)
+        last = dict(out[-1])
+        content = last["content"]
+        if isinstance(content, str):
+            last["content"] = [
+                {"type": "text", "text": content,
+                 "cache_control": {"type": "ephemeral"}},
+            ]
+        else:
+            last["content"] = cls._with_cache_breakpoint(list(content))
+        out[-1] = last
+        return out
 
     @staticmethod
     def _block_to_dict(block) -> dict:
@@ -400,11 +445,23 @@ class AnthropicBackend(Backend):
         "haiku": (1.0, 5.0),
     }
 
-    def estimate_cost_usd(self, input_tokens: int, output_tokens: int) -> float | None:
+    def estimate_cost_usd(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        cache_read_tokens: int = 0,
+        cache_creation_tokens: int = 0,
+    ) -> float | None:
         m = self.model.lower()
         for key, (pin, pout) in self._PRICING.items():
             if key in m:
-                return (input_tokens / 1_000_000) * pin + (output_tokens / 1_000_000) * pout
+                return (
+                    (input_tokens / 1_000_000) * pin
+                    # 缓存写入 1.25× base input 价、命中读取 0.1×
+                    + (cache_creation_tokens / 1_000_000) * pin * 1.25
+                    + (cache_read_tokens / 1_000_000) * pin * 0.1
+                    + (output_tokens / 1_000_000) * pout
+                )
         return None
 
     # ─── 子 Agent 配置 ──────────────────────────

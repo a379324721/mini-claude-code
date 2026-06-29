@@ -241,9 +241,17 @@ class Backend(ABC):
         """返回一个用于记忆召回的轻量调用,签名 async (system, user) -> str。"""
 
     # ── 费用估算 ──
-    def estimate_cost_usd(self, input_tokens: int, output_tokens: int) -> float | None:
+    def estimate_cost_usd(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        cache_read_tokens: int = 0,
+        cache_creation_tokens: int = 0,
+    ) -> float | None:
         """根据 model 估算费用(美元)。返回 None 表示当前后端/模型没有内置价格表
-        (例如 OpenAI 兼容路径下用任意第三方模型),Agent 据此只显示 token 数。"""
+        (例如 OpenAI 兼容路径下用任意第三方模型),Agent 据此只显示 token 数。
+        cache_read/creation 是 Anthropic 缓存命中/写入 token,按各自折扣计价;
+        不支持缓存计价的后端忽略这两个参数即可。"""
         return None
 
     # ── 子 Agent 复用配置 ──

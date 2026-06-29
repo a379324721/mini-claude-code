@@ -13,7 +13,7 @@ uv run python -m mini_claude_code --yolo "..."    # 跳过权限确认
 uv run python -m mini_claude_code --plan "..."    # 计划模式(只读)
 ```
 
-没有测试套件,也没有 lint 配置。改完代码要做端到端验证就跑一次 `uv run python -m mini_claude_code --yolo --max-turns 2 "用 list_files 列目录"`,确认流式文本、工具调用、token、cost 都正常。
+测试用 `pytest`(`uv run pytest`),`tests/` 下是纯逻辑、不触网的用例(`autouse` fixture mock 掉真实 SDK,绕开测试机代理)。没有 lint 配置。纯逻辑改动跑 `uv run pytest`;涉及流式 / 工具 / 后端的改动还要做端到端验证,跑一次 `uv run python -m mini_claude_code --yolo --max-turns 2 "用 list_files 列目录"`,确认流式文本、工具调用、token、cost 都正常。
 
 ## 高层架构
 
@@ -48,9 +48,19 @@ Agent 同时支持 Anthropic 原生 API 和 OpenAI 兼容 API(DeepSeek / Qwen / 
 
 第四层是 `compact_conversation()`——`last_input_token_count > 0.85 * window` 时调用模型生成摘要重建消息。该方法只能在最后一条是 user/assistant 普通文本时调,否则切片会把 tool_use ↔ tool_result 对截断;`_is_safe_compact_tail()` 在 re-append 末尾消息前做这个判断。
 
+### Prompt caching 断点(仅 Anthropic)
+
+`stream()` 在请求里打 3 个 `cache_control` 断点:`tools[-1]` + `system` 末尾(静态头部)+ `messages` 末尾(滚动覆盖到上一回合历史)。缓存前缀顺序是 `tools → system → messages`,逐 token 匹配。`_messages_with_cache_breakpoint` / `_with_cache_breakpoint` **返回请求副本,绝不改写 `self.messages`**——否则污染 `serialize` 与压缩流水线。压缩(snip/clear/microcompact)改写旧 message 会使其后断点失效,这是可接受的偶发 miss,所以**不在 messages 中间加断点**。
+
+缓存计价在 `estimate_cost_usd`(命中 0.1× base input 价、写入 1.25×),`usage` 带 `cache_creation`/`cache_read`(`getattr` 兜底 None→0),Agent 用 `total_cache_read/creation_tokens` 累加(含子 Agent 透传)。OpenAI 后端自动缓存、不打断点,`usage.get("cache_read", 0)` 兼容缺键。
+
+**关键不变式: `system` 前缀整个会话恒定**(`_system_prompt` 恒 = base),否则 tools+system 的缓存每轮失效。见下面 plan 模式如何遵守这条。
+
 ### Plan 模式 + clear-and-execute 流程
 
 `enter_plan_mode` / `exit_plan_mode` 是工具(在 `agent.py` 内部分发),不通过 `tools.py`。`exit_plan_mode` 的审批回调由 `__main__.py` 的 `plan_approval_fn` 注入。
+
+为遵守"system 前缀恒定"的缓存不变式,plan 约束**绝不写进 system**(`_system_prompt` 全程 = base,运行时没有任何 `set_system_prompt` 调用):`enter_plan_mode` 工具把约束文案放进 `tool_result`;手动 `/plan`(`toggle_plan_mode`)与初始 `--plan` 放进 `_pending_plan_notice`,由 `_chat` prepend 到下一条 user 消息后清空。只读保障靠 `permission_mode == "plan"` 的工具层硬拦截,不靠 prompt —— 所以把约束从 system 挪到 message 不削弱安全性。改这块时别让 `_pending_plan_notice` 漏 reset,否则会重复注入。
 
 `clear-and-execute` 路径要求:工具返回前清空历史 + 把当前工具结果作为新 user 消息塞回去。机制是 Agent 设置 `_context_cleared = True`,主循环在 tool 结果处理时检测到该标志 → 调 `backend.append_user_after_context_clear()` → `context_break = True` 跳出 for 循环。修改时小心不要让 `_context_cleared` 漏 reset,否则会在下次工具调用时错误地再次清空。
 
