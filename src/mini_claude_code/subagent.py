@@ -136,8 +136,12 @@ def get_sub_agent_config(agent_type: str) -> dict:
         return {"system_prompt": EXPLORE_PROMPT, "tools": read_only}
     elif agent_type == "plan":
         return {"system_prompt": PLAN_PROMPT, "tools": read_only}
-    else:  # general
+    elif agent_type == "general":
         return {"system_prompt": GENERAL_PROMPT, "tools": [t for t in tool_definitions if t["name"] != "agent"]}
+
+    # 未知类型: 不再静默 fallback 成全权限 general,显式报错让调用方看见
+    valid = ", ".join(t["name"] for t in get_available_agent_types())
+    raise ValueError(f"未知 agent 类型 '{agent_type}'。可用类型: {valid}")
 
 
 # ─── 可用的 Agent 类型(供系统提示词使用)──────────────
@@ -152,6 +156,37 @@ def get_available_agent_types() -> list[dict[str, str]]:
     for name, defn in _discover_custom_agents().items():
         types.append({"name": name, "description": defn["description"]})
     return types
+
+
+def inject_agent_types(tools: list[ToolDef]) -> list[ToolDef]:
+    """把所有可用 agent 类型(含 .claude/agents 自定义)注入 agent 工具的
+    type.enum 与 description。返回新列表,不修改入参里的任何 dict
+    (逐层浅拷贝 agent 工具项),避免污染模块级 tool_definitions。
+    工具列表里没有 agent 工具(如子 Agent)时为 no-op。"""
+    types = get_available_agent_types()
+    names = [t["name"] for t in types]
+    desc = "; ".join(f"{t['name']}: {t['description']}" for t in types)
+    out: list[ToolDef] = []
+    for t in tools:
+        if t["name"] == "agent":
+            schema = t["input_schema"]
+            props = schema["properties"]
+            t = {
+                **t,
+                "description": (
+                    "启动一个子 Agent 自动完成任务。子 Agent 有独立上下文,"
+                    f"只返回结果。可用类型 —— {desc}。默认: general。"
+                ),
+                "input_schema": {
+                    **schema,
+                    "properties": {
+                        **props,
+                        "type": {**props["type"], "enum": names},
+                    },
+                },
+            }
+        out.append(t)
+    return out
 
 
 def build_agent_descriptions() -> str:

@@ -41,7 +41,7 @@ from .ui import (
 )
 from .session import save_session
 from .prompt import build_system_prompt
-from .subagent import get_sub_agent_config
+from .subagent import get_sub_agent_config, inject_agent_types
 from .mcp_client import McpManager
 from .backends import (
     Backend,
@@ -523,17 +523,16 @@ Plan 模式已启用。除了下面这个 plan 文件之外,绝对不要做任�
 
         print_sub_agent_start(agent_type, description)
 
-        config = get_sub_agent_config(agent_type)
-        sub_agent = Agent(
-            model=self.model,
-            custom_system_prompt=config["system_prompt"],
-            custom_tools=config["tools"],
-            is_sub_agent=True,
-            permission_mode="plan" if self.permission_mode == "plan" else "bypassPermissions",
-            **self.backend.child_config(),
-        )
-
         try:
+            config = get_sub_agent_config(agent_type)
+            sub_agent = Agent(
+                model=self.model,
+                custom_system_prompt=config["system_prompt"],
+                custom_tools=config["tools"],
+                is_sub_agent=True,
+                permission_mode="plan" if self.permission_mode == "plan" else "bypassPermissions",
+                **self.backend.child_config(),
+            )
             result = await sub_agent.run_once(prompt)
             self.total_input_tokens += result["tokens"]["input"]
             self.total_output_tokens += result["tokens"]["output"]
@@ -589,7 +588,7 @@ Plan 模式已启用。除了下面这个 plan 文件之外,绝对不要做任�
                 _cancel_pending_early(early_executions)
 
             tool_uses, usage = await self.backend.stream(
-                tools=get_active_tool_definitions(self.tools),
+                tools=get_active_tool_definitions(inject_agent_types(self.tools)),
                 thinking_mode=self._thinking_mode,
                 on_tool_block_complete=_on_tool_block,
                 on_attempt_retry=_on_attempt_retry,
