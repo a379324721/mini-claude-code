@@ -240,6 +240,12 @@ class Backend(ABC):
     def side_query(self) -> Callable[[str, str], Awaitable[str]] | None:
         """返回一个用于记忆召回的轻量调用,签名 async (system, user) -> str。"""
 
+    # ── 费用估算 ──
+    def estimate_cost_usd(self, input_tokens: int, output_tokens: int) -> float | None:
+        """根据 model 估算费用(美元)。返回 None 表示当前后端/模型没有内置价格表
+        (例如 OpenAI 兼容路径下用任意第三方模型),Agent 据此只显示 token 数。"""
+        return None
+
     # ── 子 Agent 复用配置 ──
     @abstractmethod
     def child_config(self) -> dict:

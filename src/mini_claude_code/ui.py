@@ -89,11 +89,11 @@ def print_divider() -> None:
     console.print(f"\n[dim]  {'─' * 50}[/dim]")
 
 
-def print_cost(input_tokens: int, output_tokens: int) -> None:
-    cost_in = (input_tokens / 1_000_000) * 3
-    cost_out = (output_tokens / 1_000_000) * 15
-    total = cost_in + cost_out
-    console.print(f"\n[dim]  Token: 输入 {input_tokens} / 输出 {output_tokens} (~${total:.4f})[/dim]")
+def print_cost(input_tokens: int, output_tokens: int, cost_usd: float | None = None) -> None:
+    if cost_usd is None:
+        console.print(f"\n[dim]  Token: 输入 {input_tokens} / 输出 {output_tokens}[/dim]")
+    else:
+        console.print(f"\n[dim]  Token: 输入 {input_tokens} / 输出 {output_tokens} (~${cost_usd:.4f})[/dim]")
 
 
 def print_retry(attempt: int, max_retries: int, reason: str) -> None:

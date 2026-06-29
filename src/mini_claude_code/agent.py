@@ -246,19 +246,26 @@ class Agent:
 
     def show_cost(self) -> None:
         total = self._get_current_cost_usd()
-        budget_info = f" / 预算 ${self.max_cost_usd}" if self.max_cost_usd else ""
         turn_info = f" | 回合: {self.current_turns}/{self.max_turns}" if self.max_turns else ""
+        if total is None:
+            print_info(
+                f"Token: 输入 {self.total_input_tokens} / 输出 {self.total_output_tokens}\n"
+                f"  (当前后端无内置价目表,不估算费用){turn_info}"
+            )
+            return
+        budget_info = f" / 预算 ${self.max_cost_usd}" if self.max_cost_usd else ""
         print_info(
             f"Token: 输入 {self.total_input_tokens} / 输出 {self.total_output_tokens}\n"
             f"  预估费用: ${total:.4f}{budget_info}{turn_info}"
         )
 
-    def _get_current_cost_usd(self) -> float:
-        return (self.total_input_tokens / 1_000_000) * 3 + (self.total_output_tokens / 1_000_000) * 15
+    def _get_current_cost_usd(self) -> float | None:
+        return self.backend.estimate_cost_usd(self.total_input_tokens, self.total_output_tokens)
 
     def _check_budget(self) -> dict:
-        if self.max_cost_usd is not None and self._get_current_cost_usd() >= self.max_cost_usd:
-            return {"exceeded": True, "reason": f"费用上限已达 (${self._get_current_cost_usd():.4f} >= ${self.max_cost_usd})"}
+        cost = self._get_current_cost_usd()
+        if self.max_cost_usd is not None and cost is not None and cost >= self.max_cost_usd:
+            return {"exceeded": True, "reason": f"费用上限已达 (${cost:.4f} >= ${self.max_cost_usd})"}
         if self.max_turns is not None and self.current_turns >= self.max_turns:
             return {"exceeded": True, "reason": f"回合数上限已达 ({self.current_turns} >= {self.max_turns})"}
         return {"exceeded": False}
@@ -589,7 +596,11 @@ Plan 模式已启用。除了下面这个 plan 文件之外,绝对不要做任�
 
             if not tool_uses:
                 if not self.is_sub_agent:
-                    print_cost(self.total_input_tokens, self.total_output_tokens)
+                    print_cost(
+                        self.total_input_tokens,
+                        self.total_output_tokens,
+                        self._get_current_cost_usd(),
+                    )
                 break
 
             self.current_turns += 1

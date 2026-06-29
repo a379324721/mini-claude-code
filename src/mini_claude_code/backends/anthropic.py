@@ -369,6 +369,22 @@ class AnthropicBackend(Backend):
 
         return _sq
 
+    # ─── 费用估算 ─────────────────────────────────
+
+    # 每 M token 价格 (input, output),美元。来源 anthropic.com/pricing
+    _PRICING = {
+        "opus": (15.0, 75.0),
+        "sonnet": (3.0, 15.0),
+        "haiku": (1.0, 5.0),
+    }
+
+    def estimate_cost_usd(self, input_tokens: int, output_tokens: int) -> float | None:
+        m = self.model.lower()
+        for key, (pin, pout) in self._PRICING.items():
+            if key in m:
+                return (input_tokens / 1_000_000) * pin + (output_tokens / 1_000_000) * pout
+        return None
+
     # ─── 子 Agent 配置 ──────────────────────────
 
     def child_config(self) -> dict:
