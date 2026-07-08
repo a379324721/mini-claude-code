@@ -219,3 +219,70 @@ def _get_tool_summary(name: str, inp: dict) -> str:
     if name == "agent":
         return f'[{inp.get("type", "general")}] {inp.get("description", "")}'
     return ""
+
+
+# ─── 输出 sink ───────────────────────────────────────
+# Agent 的输出通道抽象: 主 Agent 打到终端(ConsoleSink),子 Agent 捕获到
+# 缓冲(BufferSink)。Agent 主循环无条件调 sink,不再散布 is_sub_agent 分支。
+
+
+class OutputSink:
+    """默认全部空操作 —— BufferSink 只需覆写 emit_text。"""
+
+    def emit_text(self, text: str) -> None:
+        pass
+
+    def spinner_start(self) -> None:
+        pass
+
+    def spinner_stop(self) -> None:
+        pass
+
+    def turn_cost(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        cost_usd: float | None,
+        cache_read_tokens: int,
+    ) -> None:
+        pass
+
+    def session_end(self) -> None:
+        pass
+
+
+class ConsoleSink(OutputSink):
+    def emit_text(self, text: str) -> None:
+        print_assistant_text(text)
+
+    def spinner_start(self) -> None:
+        start_spinner()
+
+    def spinner_stop(self) -> None:
+        stop_spinner()
+
+    def turn_cost(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        cost_usd: float | None,
+        cache_read_tokens: int,
+    ) -> None:
+        print_cost(input_tokens, output_tokens, cost_usd, cache_read_tokens)
+
+    def session_end(self) -> None:
+        print_divider()
+
+
+class BufferSink(OutputSink):
+    def __init__(self) -> None:
+        self._buffer: list[str] = []
+
+    def emit_text(self, text: str) -> None:
+        self._buffer.append(text)
+
+    def take(self) -> str:
+        """取走已捕获的全部文本并清空缓冲(run_once 结束时调用)。"""
+        text = "".join(self._buffer)
+        self._buffer = []
+        return text

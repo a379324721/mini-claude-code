@@ -68,7 +68,7 @@ Agent 同时支持 Anthropic 原生 API 和 OpenAI 兼容 API(DeepSeek / Qwen / 
 
 `_execute_agent_tool` 和 `_execute_skill_tool` 构造子 Agent 时**必须**用 `**self.backend.child_config()` 透传完整后端配置(api_base + anthropic_base_url + api_key),否则在用户用自定义 endpoint 时会撞回默认 SDK URL。
 
-子 Agent 的输出通过 `_output_buffer: list[str]` 捕获,而不是直接 print;`run_once()` 是入口。
+Agent 的所有控制台输出走 `self.sink`(`ui.py` 的 `OutputSink` 抽象):主 Agent 用 `ConsoleSink` 打终端,子 Agent 用 `BufferSink` 捕获(spinner/cost/divider 全部空操作),`run_once()` 是入口、结束时 `sink.take()` 取走文本。主循环里不要再写 `if not self.is_sub_agent` 的 UI 分支——新增输出点一律加到 sink 接口上。
 
 自定义 Agent 类型放在 `~/.claude/agents/*.md`(用户级)和 `./.claude/agents/*.md`(项目级,覆盖用户级),frontmatter 含 `name` / `description` / 可选 `allowed-tools`,正文是 system_prompt。`allowed-tools` 按工具名**精确匹配本项目的 snake_case 名**(`read_file` / `write_file` / `edit_file` / `list_files` / `grep_search` / `run_shell` / `web_fetch`),**不兼容 Claude Code 官方的 PascalCase 写法**(`Read` / `Bash`)——写错会过滤出空工具集,子 Agent 变哑巴。可用类型必须经 `inject_agent_types()` 注入 `agent` 工具的 `type.enum` 才能被模型选中(`subagent.py` 的 `get_available_agent_types()` 单独喂 system prompt 文字是不够的)。
 
