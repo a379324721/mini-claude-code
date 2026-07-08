@@ -22,6 +22,7 @@ from .base import (
     SNIP_THRESHOLD,
     ToolResult,
     estimate_tokens_from_messages,
+    sanitize_surrogates,
     with_retry,
 )
 
@@ -156,7 +157,9 @@ class OpenAIBackend(Backend):
                         self._stop_spinner()
                         self._emit_text("\n")
                         first_text = False
-                    self._emit_text(delta.content)
+                    # 打印走清洗(孤立代理字符会炸终端编码);累积保留原始
+                    # delta,提交时整体清洗才能把跨 delta 拆分的代理对合并回来
+                    self._emit_text(sanitize_surrogates(delta.content))
                     content += delta.content
 
                 if delta and delta.tool_calls:
@@ -186,14 +189,17 @@ class OpenAIBackend(Backend):
             if tool_calls:
                 assembled = [
                     {"id": tc["id"], "type": "function",
-                     "function": {"name": tc["name"], "arguments": tc["arguments"]}}
+                     "function": {"name": tc["name"],
+                                  "arguments": sanitize_surrogates(tc["arguments"])}}
                     for _, tc in sorted(tool_calls.items())
                 ]
 
             return {
                 "message": {
                     "role": "assistant",
-                    "content": content or None,
+                    # 提交进历史前清洗 —— 否则下一次请求 UTF-8 编码直接失败,
+                    # 且该会话此后每一轮都会报 surrogates not allowed
+                    "content": sanitize_surrogates(content) or None,
                     "tool_calls": assembled,
                 },
                 "finish_reason": finish_reason or "stop",

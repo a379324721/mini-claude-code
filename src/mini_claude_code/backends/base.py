@@ -7,12 +7,39 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from ..tools import ToolDef
+
+# ─── 代理字符清洗 ─────────────────────────────────────
+# OpenAI 兼容服务(DashScope/DeepSeek 等)的流式输出会把 emoji 的 UTF-16
+# 代理对拆到两个 SSE delta("\ud83d" + "\ude00"),json.loads 单独解析不会
+# 合并,拼接后留下孤立代理字符 —— 下一次请求 UTF-8 编码时整个 stream 直接
+# 抛 "surrogates not allowed"。所有进入消息历史的文本都要过这道清洗。
+
+_SURROGATE_PAIR = re.compile(r"[\ud800-\udbff][\udc00-\udfff]")
+_LONE_SURROGATE = re.compile(r"[\ud800-\udfff]")
+
+
+def sanitize_surrogates(text: str) -> str:
+    """相邻的高+低代理对合并还原为真实字符(不丢内容),
+    残留的孤立代理字符替换为 U+FFFD。干净文本原样返回。"""
+    try:
+        text.encode("utf-8")
+        return text
+    except UnicodeEncodeError:
+        pass
+
+    def _join(m: re.Match) -> str:
+        hi, lo = m.group(0)
+        return chr(0x10000 + ((ord(hi) - 0xD800) << 10) + (ord(lo) - 0xDC00))
+
+    text = _SURROGATE_PAIR.sub(_join, text)
+    return _LONE_SURROGATE.sub("�", text)
 
 
 def estimate_tokens_from_messages(messages: list[dict]) -> int:
